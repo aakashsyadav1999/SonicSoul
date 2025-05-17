@@ -1,28 +1,29 @@
-import sys
-import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from dotenv import load_dotenv, find_dotenv
-
-# Set up path to access src/
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
+import os
 from src.models.chatbot import ChatModel
 
-# Load environment variables
 load_dotenv(find_dotenv())
 
-# Initialize FastAPI
 app = FastAPI()
 
-# Load your model once during startup
 chat_model = ChatModel(api_key=os.getenv("GOOGLE_GEMINI_KEY"))
 
-# Define request body schema
-class InputText(BaseModel):
+# Request schemas
+class TextInput(BaseModel):
     text: str
 
-@app.post("/predict")
-def predict_sentiment(payload: InputText):
-    sentiment = chat_model.classify_sentiment(payload.text)
+@app.get("/")
+def root():
+    return {"message": "Chatbot API running"}
+
+@app.post("/predict-sentiment")
+def predict_sentiment(input: TextInput):
+    sentiment = chat_model.classify_sentiment(input.text)
     return {"sentiment": sentiment}
+
+@app.post("/chat")
+def chat(input: TextInput):
+    reply = chat_model.chat(input.text)
+    return {"reply": reply}
