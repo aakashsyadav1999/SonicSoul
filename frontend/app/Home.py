@@ -24,7 +24,7 @@ with st.sidebar:
         [
             "Home",
             "AI Playlist Recommender",
-            "Music Library",
+            "Chat with Assistant",
             "Upload",
             "Playlists",
             "Search",
@@ -101,6 +101,16 @@ elif selected == "AI Playlist Recommender":
                 st.error("Failed to get sentiment prediction.")
         except Exception as e:
             st.error(f"API call failed: {e}")
+
+elif selected == "Chat with Assistant":
+    st.header("Chat with SonicSoul Assistant")
+    chat_input = st.text_input("You:", key="chat_input")
+    if chat_input:
+        response = requests.post("http://chatbot:5000/chat", json={"text": chat_input})
+        if response.status_code == 200:
+            st.markdown(f"**Assistant:** {response.json()['reply']}")
+        else:
+            st.error("Failed to get a response from the assistant.")
 
     st.info("This is a prototype. Emotion detection uses only pretrained models. Music is recommended via Spotify or YouTube.")
 elif selected == "Music Library":
