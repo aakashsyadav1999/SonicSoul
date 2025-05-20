@@ -20,3 +20,13 @@ services:
     depends_on:
       - chatbot
     restart: unless-stopped
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql_service
+    ports:
+      - "1433:1433"
+    environment:
+      SA_PASSWORD: "advicr49"
+      ACCEPT_EULA: "Y"
+    restart: unless-stopped
