@@ -2,22 +2,58 @@ import streamlit as st
 from streamlit_option_menu import option_menu
 import sys
 import os
-
-# Add the project root directory to the Python path
-project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')) # Corrected path to be 'd:\\vscode\\SonicSoul'
-sys.path.append(project_root_path)
-# from chatbot.app.main import predict_sentiment
 import requests
 from dotenv import load_dotenv, find_dotenv
 
+
+# Add the project root directory to the Python path
+project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.append(project_root_path)
+from src.database import get_database_connection, check_user_cred
 # Load environment variables
 load_dotenv(find_dotenv())
 
-
-
+# Set up Streamlit page
 st.set_page_config(page_title="SonicSoul Home", page_icon="🎵", layout="wide")
 
-# Sidebar with feature icons
+# --- Session State Defaults ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'selected' not in st.session_state:
+    st.session_state.selected = "Home"
+
+# --- LOGIN PAGE LOGIC ---
+if not st.session_state.logged_in:
+    st.title("Login to SonicSoul")
+
+    # Input fields for username and password
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        try:
+            # Connect to the MSSQL database
+            conn = get_database_connection()
+            cursor = conn.cursor()
+
+            # Check if user credentials are correct
+            if check_user_cred(username, password):
+                st.session_state.logged_in = True
+                st.session_state.selected = "Home"  # Set default page after login
+                st.success("Login successful! Redirecting...")
+                cursor.close()
+                conn.close()
+                st.rerun()  # Simulate redirect
+            else:
+                st.error("Invalid username or password.")
+                cursor.close()
+                conn.close()
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+
+    st.stop()  # Prevent the rest of the page from rendering if not logged in
+
+# --- SIDEBAR MENU ---
 with st.sidebar:
     selected = option_menu(
         "Features",
@@ -29,8 +65,8 @@ with st.sidebar:
             "Playlists",
             "Search",
             "Settings",
-            "About"
-        ],  
+            "About",
+        ],
         icons=[
             "house",
             "robot",
@@ -39,16 +75,27 @@ with st.sidebar:
             "list-ul",
             "search",
             "gear",
-            "info-circle"
+            "info-circle",
         ],
         menu_icon="cast",
-        default_index=0,
+        default_index=[
+            "Home",
+            "AI Playlist Recommender",
+            "Chat with Assistant",
+            "Upload",
+            "Playlists",
+            "Search",
+            "Settings",
+            "About",
+        ].index(st.session_state.selected),
     )
+    st.session_state.selected = selected
 
+# --- MAIN PAGE CONTENT ---
 st.title("🎵 SonicSoul")
 st.subheader("Your AI-powered music companion")
 
-if selected == "Home":
+if st.session_state.selected == "Home":
     st.markdown("## AI Music Playlist Recommender")
     st.write(
         """
@@ -75,17 +122,14 @@ if selected == "Home":
     )
     st.markdown("---")
     st.info("Select 'AI Playlist Recommender' from the sidebar to try the emotion-based music recommender chatbot!")
-elif selected == "AI Playlist Recommender":
+
+elif st.session_state.selected == "AI Playlist Recommender":
     st.header("AI Playlist Recommender")
-    st.write(
-        """
-        Detect your mood using text, voice, or image, and get a personalized playlist!
-        """
-    )
+    st.write("Detect your mood using text, voice, or image, and get a personalized playlist!")
     st.markdown(
         """
-        - **Text Input:** Type how you feel
-        - **Voice Input:** Speak your mood (speech-to-text)
+        - **Text Input:** Type how you feel  
+        - **Voice Input:** Speak your mood (speech-to-text)  
         - **Image Input:** Upload a selfie or use your webcam
         """
     )
@@ -93,7 +137,7 @@ elif selected == "AI Playlist Recommender":
     user_text_input = st.text_input("Enter text to analyze sentiment:")
     if user_text_input:
         try:
-            response = requests.post("http://chatbot:5000/predict", json={"text": user_text_input})
+            response = requests.post("http://chatbot:5000/predictsentiment", json={"text": user_text_input})
             if response.status_code == 200:
                 sentiment = response.json()['sentiment']
                 st.success(f"Predicted Sentiment: {sentiment}")
@@ -102,33 +146,36 @@ elif selected == "AI Playlist Recommender":
         except Exception as e:
             st.error(f"API call failed: {e}")
 
-elif selected == "Chat with Assistant":
+elif st.session_state.selected == "Chat with Assistant":
     st.header("Chat with SonicSoul Assistant")
     chat_input = st.text_input("You:", key="chat_input")
     if chat_input:
-        response = requests.post("http://chatbot:5000/chat", json={"text": chat_input})
-        if response.status_code == 200:
-            st.markdown(f"**Assistant:** {response.json()['reply']}")
-        else:
-            st.error("Failed to get a response from the assistant.")
+        try:
+            response = requests.post("http://chatbot:5000/chat", json={"text": chat_input})
+            if response.status_code == 200:
+                st.markdown(f"**Assistant:** {response.json()['reply']}")
+            else:
+                st.error("Failed to get a response from the assistant.")
+        except Exception as e:
+            st.error(f"API call failed: {e}")
 
-    st.info("This is a prototype. Emotion detection uses only pretrained models. Music is recommended via Spotify or YouTube.")
-elif selected == "Music Library":
-    st.write("Browse your music library here.")
-elif selected == "Upload":
+elif st.session_state.selected == "Upload":
     st.write("Upload your favorite tracks.")
-elif selected == "Playlists":
+
+elif st.session_state.selected == "Playlists":
     st.write("Manage and play your playlists.")
-elif selected == "Search":
+
+elif st.session_state.selected == "Search":
     st.write("Search for songs, artists, or albums.")
-elif selected == "Settings":
+
+elif st.session_state.selected == "Settings":
     st.write("Adjust your preferences and settings.")
-elif selected == "About":
+
+elif st.session_state.selected == "About":
     st.write("SonicSoul - Powered by AI. Version 1.0")
+
+elif st.session_state.selected == "Login":
+    st.info("You're already logged in.")
 
 st.markdown("---")
 st.info("Select a feature from the sidebar to get started!")
-
-# To run this app, install dependencies:
-# pip install streamlit streamlit-option-menu
-# Then run: streamlit run /D:/vscode/SonicSoul/frontend/app/Home.py
