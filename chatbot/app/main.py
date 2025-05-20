@@ -2,6 +2,10 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from dotenv import load_dotenv, find_dotenv
 import os
+import sys
+
+project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.append(project_root_path)
 from src.models.chatbot import ChatModel
 
 load_dotenv(find_dotenv())
@@ -18,7 +22,7 @@ class TextInput(BaseModel):
 def root():
     return {"message": "Chatbot API running"}
 
-@app.post("/predict-sentiment")
+@app.post("/predictsentiment")
 def predict_sentiment(input: TextInput):
     sentiment = chat_model.classify_sentiment(input.text)
     return {"sentiment": sentiment}
