@@ -19,14 +19,29 @@ services:
       - "8501:8501"
     depends_on:
       - chatbot
+      - mysql # Added dependency on mysql
+    environment: # Add this section
+      - DB_HOST=mysql # Changed from localhost to mysql
+      - DB_USER=ray
+      - DB_PASSWORD=advicr49
+      - DB_NAME=music_prediction_db
+      - DB_PORT=3306
     restart: unless-stopped
 
-  mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: mssql_service
+  mysql:
+    image: mysql:latest
+    container_name: mysql_service
     ports:
-      - "1433:1433"
+      - "3307:3306" # Changed host port to 3307
     environment:
-      SA_PASSWORD: "advicr49"
-      ACCEPT_EULA: "Y"
+      MYSQL_ROOT_PASSWORD: "advicr49"
+      MYSQL_DATABASE: "music_prediction_db"
+      MYSQL_USER: "ray"
+      MYSQL_PASSWORD: "advicr49"
     restart: unless-stopped
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+
+volumes:
+  mysql_data:
