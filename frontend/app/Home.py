@@ -10,6 +10,8 @@ from dotenv import load_dotenv, find_dotenv
 project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(project_root_path)
 from src.database import get_database_connection, check_user_cred
+from src.middleware.auth import get_spotify_client, get_user_playlists # Changed get_spotify_token to get_spotify_client
+
 # Load environment variables
 load_dotenv(find_dotenv())
 
@@ -39,8 +41,27 @@ if not st.session_state.logged_in:
             # Check if user credentials are correct
             if check_user_cred(username, password):
                 st.session_state.logged_in = True
+                st.session_state.username = username # Save username in session state
                 st.session_state.selected = "Home"  # Set default page after login
                 st.success("Login successful! Redirecting...")
+
+                # Attempt to get Spotify client after successful login
+                try:
+                    print(f"Attempting to get Spotify client for user: {username}")
+                    sp = get_spotify_client(username) # Changed to get_spotify_client
+                    if sp:
+                        st.session_state.spotify_client = sp
+                        st.success("Spotify client initialized successfully.")
+                        # Optionally, fetch playlists immediately or defer to when needed
+                        # user_playlists = get_user_playlists(sp)
+                        # st.session_state.user_playlists = user_playlists
+                    else:
+                        st.warning("Could not initialize Spotify client. Please ensure you have authorized the app and check logs.")
+                except ValueError as ve:
+                    st.error(f"Spotify Configuration Error: {ve}")
+                except Exception as e:
+                    st.error(f"An error occurred during Spotify authentication: {e}")
+
                 cursor.close()
                 conn.close()
                 st.rerun()  # Simulate redirect
@@ -59,12 +80,10 @@ with st.sidebar:
         "Features",
         [
             "Home",
-            "AI Playlist Recommender",
+            "AI Text Playlist Recommender",
+            "AI Voice Playlist Recommender",
+            "AI Image Playlist Recommender",
             "Chat with Assistant",
-            "Upload",
-            "Playlists",
-            "Search",
-            "Settings",
             "About",
         ],
         icons=[
@@ -80,12 +99,10 @@ with st.sidebar:
         menu_icon="cast",
         default_index=[
             "Home",
-            "AI Playlist Recommender",
+            "AI Text Playlist Recommender",
+            "AI Voice Playlist Recommender",
+            "AI Image Playlist Recommender",
             "Chat with Assistant",
-            "Upload",
-            "Playlists",
-            "Search",
-            "Settings",
             "About",
         ].index(st.session_state.selected),
     )
@@ -123,7 +140,7 @@ if st.session_state.selected == "Home":
     st.markdown("---")
     st.info("Select 'AI Playlist Recommender' from the sidebar to try the emotion-based music recommender chatbot!")
 
-elif st.session_state.selected == "AI Playlist Recommender":
+elif st.session_state.selected == "AI Text Playlist Recommender":
     st.header("AI Playlist Recommender")
     st.write("Detect your mood using text, voice, or image, and get a personalized playlist!")
     st.markdown(
@@ -145,7 +162,33 @@ elif st.session_state.selected == "AI Playlist Recommender":
                 st.error("Failed to get sentiment prediction.")
         except Exception as e:
             st.error(f"API call failed: {e}")
+            
+elif st.session_state.selected == "AI Voice Playlist Recommender":
+    st.header("Chat with SonicSoul Assistant")
+    chat_input = st.text_input("You:", key="chat_input")
+    if chat_input:
+        try:
+            response = requests.post("http://chatbot:5000/voice", json={"text": chat_input})
+            if response.status_code == 200:
+                st.markdown(f"**Assistant:** {response.json()['reply']}")
+            else:
+                st.error("Failed to get a response from the assistant.")
+        except Exception as e:
+            st.error(f"API call failed: {e}")
 
+elif st.session_state.selected == "AI Image Playlist Recommender":
+    st.header("Chat with SonicSoul Assistant")
+    chat_input = st.text_input("You:", key="chat_input")
+    if chat_input:
+        try:
+            response = requests.post("http://chatbot:5000/image", json={"text": chat_input})
+            if response.status_code == 200:
+                st.markdown(f"**Assistant:** {response.json()['reply']}")
+            else:
+                st.error("Failed to get a response from the assistant.")
+        except Exception as e:
+            st.error(f"API call failed: {e}")
+            
 elif st.session_state.selected == "Chat with Assistant":
     st.header("Chat with SonicSoul Assistant")
     chat_input = st.text_input("You:", key="chat_input")
@@ -158,24 +201,9 @@ elif st.session_state.selected == "Chat with Assistant":
                 st.error("Failed to get a response from the assistant.")
         except Exception as e:
             st.error(f"API call failed: {e}")
-
-elif st.session_state.selected == "Upload":
-    st.write("Upload your favorite tracks.")
-
-elif st.session_state.selected == "Playlists":
-    st.write("Manage and play your playlists.")
-
-elif st.session_state.selected == "Search":
-    st.write("Search for songs, artists, or albums.")
-
-elif st.session_state.selected == "Settings":
-    st.write("Adjust your preferences and settings.")
-
+            
 elif st.session_state.selected == "About":
     st.write("SonicSoul - Powered by AI. Version 1.0")
-
-elif st.session_state.selected == "Login":
-    st.info("You're already logged in.")
 
 st.markdown("---")
 st.info("Select a feature from the sidebar to get started!")
