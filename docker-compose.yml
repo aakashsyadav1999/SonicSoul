@@ -19,9 +19,9 @@ services:
       - "8501:8501"
     depends_on:
       - chatbot
-      - mysql # Added dependency on mysql
-    environment: # Add this section
-      - DB_HOST=mysql # Changed from localhost to mysql
+      - mysql
+    environment:
+      - DB_HOST=mysql        # Points to mysql container hostname inside network
       - DB_USER=ray
       - DB_PASSWORD=advicr49
       - DB_NAME=music_prediction_db
@@ -32,16 +32,15 @@ services:
     image: mysql:latest
     container_name: mysql_service
     ports:
-      - "3307:3306" # Changed host port to 3307
+      - "3307:3306"          # Maps host port 3307 to container 3306
     environment:
       MYSQL_ROOT_PASSWORD: "advicr49"
       MYSQL_DATABASE: "music_prediction_db"
       MYSQL_USER: "ray"
       MYSQL_PASSWORD: "advicr49"
-    restart: unless-stopped
     volumes:
       - mysql_data:/var/lib/mysql
-
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
 volumes:
   mysql_data:
