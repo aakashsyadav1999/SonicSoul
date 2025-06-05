@@ -1,2 +1,5 @@
 pyodbc
 mysql-connector-python
+python-dotenv
+spotipy
+fastapi
