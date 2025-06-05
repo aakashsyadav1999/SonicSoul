@@ -6,8 +6,9 @@ uvicorn
 httpx
 google-generativeai
 google-genai
-python-dotenv
 pyodbc
 pymysql
 mysql-connector-python
 spotipy
+cryptography
+requests
