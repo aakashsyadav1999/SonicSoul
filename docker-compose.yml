@@ -2,13 +2,53 @@ version: '3.8'
 
 services:
   chatbot:
+    container_name: chatbot_service
     build:
       context: .
       dockerfile: chatbot/Dockerfile
-    container_name: chatbot_service
     ports:
       - "5000:5000"
+    networks:
+      - sonicsoul_network
+    environment:
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  music-recommender:
+    container_name: music_recommender_service
+    build:
+      context: .
+      dockerfile: music-recommender/Dockerfile
+    ports:
+      - "5001:5001"
+    networks:
+      - sonicsoul_network
+    depends_on:
+      mysql:
+        condition: service_healthy # Ensure mysql is healthy
+    environment:
+      - DB_HOST=mysql
+      - DB_USER=ray
+      - DB_PASSWORD=advicr49
+      - DB_NAME=music_prediction_db
+      - DB_PORT=3306
+      - SPOTIPY_CLIENT_ID=${SPOTIPY_CLIENT_ID}
+      - SPOTIPY_CLIENT_SECRET=${SPOTIPY_CLIENT_SECRET}
+      - SPOTIPY_REDIRECT_URI=http://localhost:8502/callback
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5001/ || exit 1"]
+      interval: 15s # Increased interval slightly
+      timeout: 10s # Increased timeout
+      retries: 5
+      start_period: 40s # Increased start_period
 
   frontend:
     build:
@@ -16,23 +56,33 @@ services:
       dockerfile: frontend/Dockerfile
     container_name: frontend_service
     ports:
-      - "8501:8501"
+      - "8502:8501"
+    networks:
+      - sonicsoul_network
     depends_on:
-      - chatbot
-      - mysql
+      chatbot: # Assuming chatbot starts relatively quickly or doesn't need a specific health check for frontend's immediate needs
+        condition: service_started
+      music-recommender:
+        condition: service_healthy # Wait for music-recommender to be healthy
+      mysql:
+        condition: service_healthy # Wait for mysql to be healthy
     environment:
-      - DB_HOST=mysql        # Points to mysql container hostname inside network
+      - DB_HOST=mysql_service
       - DB_USER=ray
       - DB_PASSWORD=advicr49
       - DB_NAME=music_prediction_db
       - DB_PORT=3306
+      - CHATBOT_URL=http://chatbot:5000
+      - MUSIC_RECOMMENDER_URL=http://music-recommender:5001
     restart: unless-stopped
 
   mysql:
     image: mysql:latest
     container_name: mysql_service
     ports:
-      - "3307:3306"          # Maps host port 3307 to container 3306
+      - "3307:3306"
+    networks:
+      - sonicsoul_network
     environment:
       MYSQL_ROOT_PASSWORD: "advicr49"
       MYSQL_DATABASE: "music_prediction_db"
@@ -41,6 +91,17 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: ['mysqld', '--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u$$MYSQL_USER", "-p$$MYSQL_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  sonicsoul_network:
+    driver: bridge
 
 volumes:
   mysql_data:
