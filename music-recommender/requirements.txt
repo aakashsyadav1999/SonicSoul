@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+spotipy
+python-dotenv
+pymysql
+cryptography
+google-generativeai
+google-genai
