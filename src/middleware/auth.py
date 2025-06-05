@@ -1,9 +1,10 @@
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 import os
 import sys
 import json
 from dotenv import load_dotenv, find_dotenv
+from src.exceptions.spotify_exceptions import SpotifyAuthError
 
 # Add the project root directory to the Python path
 project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -14,153 +15,184 @@ from src.database import get_database_connection
 
 load_dotenv(find_dotenv())
 
-def _fetch_new_spotify_token_and_save(username: str, auth_manager: SpotifyOAuth) -> spotipy.Spotify | None:
+def get_client_credentials_spotify():
+    """
+    Get a Spotify client using client credentials flow.
+    This doesn't require user authentication but has limited access.
+    """
     try:
-        auth_url = auth_manager.get_authorize_url()
-        print(f"Authorize here:\n{auth_url}\n")
-        redirected_response = input("Paste the full redirect URL here:\n")
+        client_id = os.getenv('SPOTIPY_CLIENT_ID')
+        client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
 
-        code = auth_manager.parse_response_code(redirected_response)
-        if not code:
-            print("Could not parse authorization code.")
+        if not all([client_id, client_secret]):
+            print("Missing Spotify credentials in environment")
             return None
 
-        token_info = auth_manager.get_cached_token()
-        if not token_info:
-            code = auth_manager.get_authorization_code()
-            token_info = auth_manager.get_access_token(code)
+        client_credentials_manager = SpotifyClientCredentials(
+            client_id=client_id,
+            client_secret=client_secret
+        )
         
-        # Check if we got the token info
-        access_token = token_info.get("access_token")
-
-        if access_token:
-            print(f"Access token fetched for user {username}")
-
-            # Store only the access_token
-            try:
-                conn = get_database_connection()
-                cursor = conn.cursor()
-                cursor.execute(
-                                "UPDATE users SET spotify_access_token = %s WHERE username = %s",
-                                (access_token, username)
-                            )
-                conn.commit()
-                print(f"Access token saved to DB for {username}")
-            except Exception as e:
-                print(f"DB Error: {e}")
-            finally:
-                if cursor: cursor.close()
-                if conn: conn.close()
-
-            return spotipy.Spotify(auth=access_token)
-        else:
-            print("Access token not received.")
-            return None
-
+        return spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+        
     except Exception as e:
-        print(f"Error fetching token: {e}")
+        print(f"Error creating client credentials client: {e}")
         return None
+
+def _fetch_new_spotify_token_and_save(username: str, auth_manager: SpotifyOAuth) -> spotipy.Spotify | None:
+    """
+    Initiates a new Spotify authorization flow.
+    Returns None and raises SpotifyAuthError with auth URL for frontend to handle.
+    """
+    try:
+        # First try client credentials as fallback
+        sp = get_client_credentials_spotify()
+        if sp:
+            print("Using client credentials flow as fallback")
+            return sp
+            
+        # If that fails, proceed with full auth flow
+        auth_url = auth_manager.get_authorize_url()
+        print(f"Spotify Authorization URL: {auth_url}")
+        
+        raise SpotifyAuthError(
+            message="Please authorize with Spotify",
+            auth_url=auth_url
+        )
+
+    except SpotifyAuthError:
+        raise
+    except Exception as e:
+        print(f"Error in auth flow: {e}")
+        return None
+
+def _refresh_token(username: str, auth_manager: SpotifyOAuth, token_info: dict) -> tuple[bool, spotipy.Spotify | None]:
+    """
+    Attempts to refresh an expired token.
+    Returns (success, spotify_client)
+    """
+    try:
+        if not auth_manager.is_token_expired(token_info):
+            return True, spotipy.Spotify(auth=token_info['access_token'])
+            
+        # Token expired, try to refresh
+        new_token = auth_manager.refresh_access_token(token_info['refresh_token'])
+        print("Successfully refreshed token")
+        
+        # Save new token
+        conn = get_database_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE users SET spotify_access_token = %s WHERE username = %s",
+                (json.dumps(new_token), username)
+            )
+            conn.commit()
+            print("Saved refreshed token to database")
+        finally:
+            cursor.close()
+            conn.close()
+            
+        return True, spotipy.Spotify(auth=new_token['access_token'])
+        
+    except Exception as e:
+        print(f"Token refresh failed: {e}")
+        return False, None
 
 def get_spotify_client(username: str) -> spotipy.Spotify | None:
     """
     Retrieves a Spotify client for the user.
-    It tries to load and refresh an existing token from the DB,
-    otherwise, it fetches a new one.
+    First tries the database token, then attempts refresh, 
+    then client credentials, finally initiates new auth.
     """
-    client_id = os.getenv('SPOTIPY_CLIENT_ID')
-    client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
-    redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI')
-
-    if not all([client_id, client_secret, redirect_uri]):
-        print("Spotify API credentials (SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, SPOTIPY_REDIRECT_URI) are not fully configured.")
-        raise ValueError("Spotify API credentials are not fully configured.")
-
-    cache_path = f".spotify_cache_{username}"
-    scope = 'user-library-read playlist-read-private'
-
-    auth_manager = SpotifyOAuth(
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-        scope=scope,
-        cache_path=cache_path,
-        show_dialog=False, # Initially false, only show dialog if explicitly fetching new
-        open_browser=True
-    )
-
-    token_info_str = None
-    conn_db = None
-    cursor_db = None
     try:
-        conn_db = get_database_connection()
-        cursor_db = conn_db.cursor()
-        # Use %s placeholder for pymysql
-        query = "SELECT spotify_token_info FROM Users WHERE username = %s"
-        cursor_db.execute(query, (username,)) # Changed to pass username as a tuple
-        result = cursor_db.fetchone()
-        if result and result[0]:
-            token_info_str = result[0]
-    except Exception as e:
-        print(f"Error fetching token from DB for {username}: {e}")
-    finally:
-        if cursor_db: cursor_db.close()
-        if conn_db: conn_db.close()
+        client_id = os.getenv('SPOTIPY_CLIENT_ID')
+        client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
+        redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI', 'http://localhost:8502/callback')
 
-    if token_info_str:
-        print(f"Token found in DB for user {username}.")
-        token_info = json.loads(token_info_str)
-        print(f"--- Token Info from DB for {username} ---")
-        print(json.dumps(token_info, indent=2))
-        print("---------------------------------------")
-        
-        # Load token into auth_manager's cache to allow refresh and validation
-        auth_manager.cache_handler.save_token_to_cache(token_info)
+        if not all([client_id, client_secret]):
+            print("Missing Spotify credentials in environment")
+            raise ValueError("Spotify API credentials not configured")
+            
+        print(f"Initializing Spotify auth for user: {username}")
 
-        if auth_manager.is_token_expired(token_info):
-            print(f"Token for {username} is expired. Attempting refresh.")
-            try:
-                refreshed_token_info = auth_manager.refresh_access_token(token_info['refresh_token'])
-                print(f"Token for {username} refreshed successfully.")
-                token_info = refreshed_token_info # Use the new token
-                print(f"--- Refreshed Token Info for {username} ---")
-                print(json.dumps(token_info, indent=2))
-                print("-----------------------------------------")
-                
-                conn_save, cursor_save = None, None
+        # First try client credentials as quick fallback
+        sp = get_client_credentials_spotify()
+        if sp:
+            print("Using client credentials flow")
+            return sp
+
+        # If we need user auth, proceed with full flow
+        print(f"Using redirect URI: {redirect_uri}")
+        auth_manager = SpotifyOAuth(
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            scope='user-library-read playlist-read-private',
+            cache_path=f".spotify_cache_{username}",
+            show_dialog=True
+        )
+
+        # Try to get token from database
+        token_info = None
+        try:
+            conn = get_database_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT spotify_access_token FROM users WHERE username = %s", (username,))
+            result = cursor.fetchone()
+            if result and result[0]:
+                print(f"Found token in database for: {username}")
+                token_info = json.loads(result[0])
+        except Exception as db_error:
+            print(f"Database error: {str(db_error)}")
+            token_info = None
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'conn' in locals():
+                conn.close()
+
+        # If we have a token, try to use it or refresh it
+        if token_info:
+            success, sp = _refresh_token(username, auth_manager, token_info)
+            if success:
                 try:
-                    conn_save = get_database_connection()
-                    cursor_save = conn_save.cursor()
-                    # Use %s placeholder for pymysql
-                    sql_update = "UPDATE Users SET spotify_token_info = %s WHERE username = %s"
-                    # Ensure parameters are passed as a tuple
-                    cursor_save.execute(sql_update, (json.dumps(token_info), username))
-                    conn_save.commit()
-                    print(f"Refreshed token for {username} saved to DB.")
-                    auth_manager.cache_handler.save_token_to_cache(token_info) # Update cache
-                except Exception as e_save:
-                    print(f"Error saving refreshed token to DB for {username}: {e_save}")
-                finally:
-                    if cursor_save: cursor_save.close()
-                    if conn_save: conn_save.close()
-            except spotipy.SpotifyOauthError as e_refresh:
-                print(f"Could not refresh token for {username}: {e_refresh}. Fetching new token.")
-                # Force new auth by setting show_dialog true for the fetch function
-                auth_manager.show_dialog = True
-                return _fetch_new_spotify_token_and_save(username, auth_manager)
-            except Exception as e_generic_refresh:
-                print(f"Generic error during token refresh for {username}: {e_generic_refresh}. Fetching new token.")
-                auth_manager.show_dialog = True
-                return _fetch_new_spotify_token_and_save(username, auth_manager)
-        
-        # If token was not expired, or was successfully refreshed and is now in token_info
-        print(f"Using existing/refreshed token for {username}.")
-        return spotipy.Spotify(auth_manager=auth_manager) # auth_manager has the token via cache
-    else:
-        print(f"No token in DB for {username}. Fetching new token.")
-        auth_manager.show_dialog = True # Ensure dialog for initial token fetch
+                    sp.current_user()
+                    print("Successfully verified token")
+                    return sp
+                except Exception as e:
+                    print(f"Token verification failed: {e}")
+            
+        # If we get here, we need new authorization
+        print(f"Initiating new auth flow for: {username}")
         return _fetch_new_spotify_token_and_save(username, auth_manager)
 
+    except SpotifyAuthError:
+        # Re-raise for frontend to handle
+        raise
+    except Exception as e:
+        print(f"Unexpected error in get_spotify_client: {str(e)}")
+        # Try client credentials one last time
+        return get_client_credentials_spotify()
+
+def spotify_login(username: str) -> spotipy.Spotify | None:
+    """
+    Entry point for Spotify login flow.
+    Handles getting/refreshing tokens and new auth if needed.
+    """
+    try:
+        print(f"Starting Spotify login for: {username}")
+        return get_spotify_client(username)
+            
+    except SpotifyAuthError as auth_error:
+        # Re-raise for frontend to handle redirect
+        raise
+    except Exception as e:
+        print(f"Error in spotify_login: {str(e)}")
+        return None
+
 def get_user_playlists(sp):
+    """Get user's Spotify playlists"""
     results = sp.current_user_playlists(limit=50)
     playlists = results['items']
     
