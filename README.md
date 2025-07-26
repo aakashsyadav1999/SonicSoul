@@ -81,8 +81,8 @@ GOOGLE_GEMINI_KEY=your_gemini_api_key
 
 # Database Configuration
 DB_HOST=mysql
-DB_USER=ray
-DB_PASSWORD=advicr49
+DB_USER=your_user_name
+DB_PASSWORD=password
 DB_NAME=music_prediction_db
 DB_PORT=3306
 
@@ -332,6 +332,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### 🌟 Star this repository if you find SonicSoul helpful!
 
-**Made with ❤️ by [Aakash Yadav]**
+**Made with ❤️ by Aakash Yadav**
 
 *SonicSoul - Where AI meets music, and emotions find their perfect soundtrack.*
